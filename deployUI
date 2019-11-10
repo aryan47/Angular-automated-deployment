@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon May  6 11:33:58 2019
+
+@author: ritesh
+"""
+"""
+This script is made to deploy UI in any platform (based on configuration provide by user)
+Features are:
+    1.Auto one click deployment
+    2.RollBack feature
+    3.Backup feature
+    4.Tag based deployment
+    5.Deployment with npm install
+Upcoming features are:
+    1.Notification to concerned people via mail while deployement and in case of failure
+    1.Notification to concerned people via mail while rollback
+
+To use this script
+    1.First configure the deployUIConfig.py file with all the required details
+    2.For help we can use command:eg: ./deployUI --help (or) ./deployUI -h
+    3.To deploy with Tags.eg: ./deployUI --tag v2.3 (or) ./deployUI -t v2.3 
+    4.To rollback to previous build. eg: ./deployUI --rollback (or) 
+    5.To deploy with npm install. eg: ./deployUI --npm (or) ./deploy -n
+"""
+
+# import necessary packages
+
+
+# flag to track npm_install option
+
+import subprocess as sp
+import os
+from datetime import date
+from deployUIConfig import CONFIG
+import optparse
+import backup_and_rollback as bar
+from setup import I_CONFIG as path
+npm_install = False
+# holds tag version given by user
+given_tag = ''
+
+# global configuration from deployUIConfig file
+backup_limit = CONFIG['backup_limit']
+backup_folder_loc = CONFIG['backup_folder_loc']
+ui_codebase_path = CONFIG['ui_codebase_path']
+deployed_folder_loc = CONFIG['deployed_folder_loc']
+configuration_type = CONFIG['configuration_type']
+active_branch = CONFIG['active_branch']
+
+# option parser
+opt = optparse.OptionParser()
+opt.add_option('-r', '--rollback', action='store_true', default=False, dest="rollback",
+               help="This option is used to rollback to previous stable release")
+opt.add_option('-n', '--npm', action="store_true", default=False,
+               dest="npm_install", help="This option will enable npm install before build")
+opt.add_option('-t', '--tag', dest='given_tag',
+               help='This option is used to provide input tag of release')
+(options, arguments) = opt.parse_args()
+
+# if rollback
+if options.rollback:
+    os.chdir(ui_codebase_path)
+    print('\033[1;32;40m Rolling back... ')
+    bar.rollback()
+
+# if npm install
+if options.npm_install:
+    npm_install = True
+    print('\033[1;32;40m npm install... ')
+
+# if tag is provided
+if options.given_tag:
+    given_tag = options.given_tag.strip()
+
+# change the directory to codebase path
+os.chdir(ui_codebase_path)
+# handles backup folder
+try:
+    print('\033[1;32;40m Creating Backup Folder.... ')
+    # os.mkdir(backup_folder_loc)
+    sp.call([path["mkdir"], "-p", backup_folder_loc])
+
+except:
+    print('\033[1;32;40m Backup Folder Found.... ')
+# handles deployed folder
+try:
+    print('\033[1;32;40m Creating Deployed Folder.... ')
+    os.mkdir(deployed_folder_loc)
+    # sp.call([path["mkdir"], "-p", deployed_folder_loc])
+
+except:
+    print('\033[1;32;40m Deployed Folder Found.... ')
+    print('\033[m')
+# Create trash folder
+# try:
+#     os.mkdir('trash')
+# except:
+#     print('\033[1;32;40m Trash Folder Found.... ')
+#     print('\033[m')
+
+# sp.call("sed -i 's/dist/Deployed/g' server.js", shell=True)
+# bar.create_backup()
+
+
+# chekout to the branch before git pull
+sp.call("git checkout "+active_branch, shell=True)
+# get git pull
+sp.call(["git", "pull"])
+# check if tag is given by user or not
+if given_tag:
+    print('\033[1;32;40m Checking out to tag: '+given_tag)
+    sp.call('git checkout '+given_tag, shell=True)
+    exit()
+
+print("\033[1;32;40m Wait for a while.....")
+print('\033[m')
+if(npm_install):
+    sp.call("npm i", shell=True)
+# create UI build for environment provide by user
+depStatus = sp.call(
+    ["ng", "build", "--configuration="+str(configuration_type)])
+# if some error occured
+if depStatus != 0:
+    print('\033[1;31;40m Some Error Occurred while building, please wait to collect the error report.......: \n')
+    error = sp.check_output(["ng", "build", "--configuration=qa"])
+    print(error)
+# checks if build is success or not
+if depStatus == 0:
+    print("\033[1;32;40m Build is successful.....")
+
+    # create backup for build
+    bar.create_backup()
+    # replacing old build with new build
+    serverStatus = sp.call(path['rm']+" -rf "+deployed_folder_loc+"Demo-app &&"+path['cp']+" -r dist/Demo-app " +
+                           deployed_folder_loc, shell=True)
+    if serverStatus == 0:
+        print('\033[1;32;40m server is restored......')
+    else:
+        print('\033[1;31;40m Failed to restore server......')
+    print('\033[1;32;40m Deployed successfully!!')
+else:
+    print('\033[1;31;40m Error Occurred while building: \n')
